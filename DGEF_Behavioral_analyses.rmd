@@ -22,35 +22,108 @@ if (!require("tidyverse")) install.packages("tidyverse")
 if (!require("Hmisc")) install.packages("Hmisc")
 if (!require("BayesFactor")) install.packages("BayesFactor")
 if (!require("reshape")) install.packages("reshape")
+if (!require("sjstats")) install.packages("sjstats")
+if (!require("sjPlot")) install.packages("sjPlot")
+if (!require("lme4")) install.packages("lme4")
+
 library(gapminder)
 library(dplyr)
 library(tidyverse)
 library(Hmisc)
 library(reshape)
-
+library(sjstats)
+library(sjPlot)
+library(lme4)
 ```
 
 
 
-```{r, echo=FALSE, results="hide"}
+```{r Import data, echo=FALSE, results="hide"}
 ## Import data
 
 wd <- ("C:/Users/gdavide/Documents/Pourtois/Master student supervision/DGEF/analyses/")
 setwd(wd) # set work directory
-raw <- read.csv2("33.csv",header=TRUE,na.strings="NaN") # read data
 
+# DGEF data
+raw <- read.csv2("52.csv",header=TRUE,na.strings="NaN") # read data DGEF
 
-as.factor(raw$Running.Trial.)
-as.factor(raw$Subject)
-as.factor(raw$Condition)
-
+raw$Condition = as.factor(raw$Condition)
 
 # filter out practice and instructions
-
 expdata = raw[(raw$Running.Trial. %in% "ExperimentList"),]
 
+# Questionnaires - BisBas, NeedForCognition
+quest <- read.csv2("DGEF_Q_52.csv",header=TRUE,na.strings="NaN") # read data questionnaires
+
 ```
-```{r}
+```{r Questionnaires}
+## Questionnaires
+## BISBAS
+quest.bisbas = quest[(quest$Procedure.Block. %in% "QBISBAS"),]
+# revert scores for items except 2,22 - 4 opt likert, range 0-3
+quest.bisbas$ItemdisplayBISBAS.RESP[!(quest.bisbas$ItemsBISBAS %in% c(2,22))] = 3-quest.bisbas$ItemdisplayBISBAS.RESP[!(quest.bisbas$ItemsBISBAS %in% c(2,22))]
+# define subscales by item
+quest.bas.drive = quest.bisbas[(quest.bisbas$ItemsBISBAS %in% c(3, 9, 12, 21)),]
+quest.bas.fun = quest.bisbas[(quest.bisbas$ItemsBISBAS %in% c(5, 10, 15, 20)),]
+quest.bas.reward = quest.bisbas[(quest.bisbas$ItemsBISBAS %in% c(4, 7, 14, 18, 23)),]
+quest.bis = quest.bisbas[(quest.bisbas$ItemsBISBAS %in% c(2, 8, 13, 16, 19, 22, 24)),]
+# individual score for subscale
+bas.drive.subj = group_by(quest.bas.drive, Subject)
+bas.drive.subj = summarise(bas.drive.subj,
+                           sumscore = sum(ItemdisplayBISBAS.RESP))
+bas.fun.subj = group_by(quest.bas.fun, Subject)
+bas.fun.subj = summarise(bas.fun.subj,
+                           sumscore = sum(ItemdisplayBISBAS.RESP))
+bas.reward.subj = group_by(quest.bas.reward, Subject)
+bas.reward.subj = summarise(bas.reward.subj,
+                           sumscore = sum(ItemdisplayBISBAS.RESP))
+bis.subj = group_by(quest.bis, Subject)
+bis.subj = summarise(bis.subj,
+                           sumscore = sum(ItemdisplayBISBAS.RESP))
+
+## NFC
+quest.nfc = quest[(quest$Procedure.Block. %in% "QNFC"),]
+# revert scores for items 3,4,5,7,8,9,12,16,17 - 5 opt likert, range 0-4
+quest.nfc$ItemdisplayNFC.RESP[(quest.nfc$ItemsNFC %in% c(3,4,5,7,8,9,12,16,17))] = 4-quest.nfc$ItemdisplayNFC.RESP[(quest.nfc$ItemsNFC %in% c(3,4,5,7,8,9,12,16,17))]
+# individual score 
+nfc.subj = group_by(quest.nfc, Subject)
+nfc.subj = summarise(nfc.subj,
+                     sumscore = sum(ItemdisplayNFC.RESP))
+
+## dataframe with all questionnaire's individual scores
+# bind the scales together
+quest.subj = rbind(bas.drive.subj,bas.fun.subj,bas.reward.subj,bis.subj,nfc.subj)
+# add scale name variable 
+quest.subj$scale = rep(c("drive","fun","reward","bis","NFC"),   
+                                       each = length(unique(quest.subj$Subject)))
+# wide format
+quest.subj.wide = dcast(quest.subj, Subject ~ scale, value.var="sumscore")
+  
+## plot
+
+  #plot correlation
+  quest.subj.wide %>%
+    ggplot(aes(x = NFC, y = bis)) +
+    geom_point() +
+    geom_smooth(method=lm, se=TRUE, fullrange=TRUE) +
+    theme(axis.text = element_text(size = 16),
+          axis.title = element_text(size = 16))
+
+  # plot violin
+  quest.subj %>%
+    ggplot(aes(x = scale, y = sumscore)) +
+    geom_point() +
+    geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+                position = "dodge", draw_quantiles = NULL, trim = TRUE,
+                scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) + 
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
+    geom_jitter(shape=16, position=position_jitter(0.02), size=1) +
+    theme(axis.text = element_text(size = 16),
+          axis.title = element_text(size = 16))
+
+```
+
+```{r Age}
 ## Age
 
 # subset
@@ -63,7 +136,7 @@ age.subj = c(median(expdata.age$Age),range(expdata.age$Age))
 
 ```
 
-```{r}
+```{r Doors.RESP}
 ## Doors.RESP - Door selection
 
 # filter single entries of Doors.RESP
@@ -82,7 +155,7 @@ doorresp.subj
 ```
 
 
-```{r}
+```{r RateX}
 ## RateX - Effort Task ratings
 
 # filter RatingList
@@ -169,7 +242,7 @@ ETR.subj %>%
   facet_grid(. ~ qtype)
 ```
 
-```{r}
+```{r EffortResponse.ACC}
 ## EffortResponse.ACC
 
 #filter EffortTaskList
@@ -227,7 +300,7 @@ bf.acc = ttestBF(x = acc.subj$ACC.mean[(acc.subj$Condition %in% "22")],
 bf.acc
 ```
 
-```{r}
+```{r EffortResponse.RT}
 ## EffortResponse.RT
 
 
@@ -289,7 +362,7 @@ RT.subj %>%
         axis.title = element_text(size = 16))
 ```
 
-```{r}
+```{r FB ratings - guessing}
 ## FB ratings - after guessing
 
 #filter FbRateProc
@@ -336,7 +409,31 @@ expdata.FbRate$efflev[(expdata.FbRate$Condition %in% c("51","52"))] = "high"
 
 expdata.FbRate$efflev = as.factor(expdata.FbRate$efflev)
 
+## combine expdata.FbRate with questionnaires' individual scores
+expdata.FbRate = merge(expdata.FbRate, quest.subj.wide)
+# center questionaires
+expdata.FbRate$drive = scale(expdata.FbRate$drive, center=TRUE, scale=FALSE)
+expdata.FbRate$fun = scale(expdata.FbRate$fun, center=TRUE, scale=FALSE)
+expdata.FbRate$reward = scale(expdata.FbRate$reward, center=TRUE, scale=FALSE)
+expdata.FbRate$bis = scale(expdata.FbRate$bis, center=TRUE, scale=FALSE)
+expdata.FbRate$NFC = scale(expdata.FbRate$NFC, center=TRUE, scale=FALSE)
 
+# ## exclude sbj with out-of-scale FB rating
+# FbRate.blacklist = unique(expdata.FbRate$Subject[(expdata.FbRate$percent > 110 | expdata.FbRate$percent < -10)])
+# expdata.FbRate = expdata.FbRate[!(expdata.FbRate$Subject %in% FbRate.blacklist),]
+
+## plot FbRate for cond against questionnaire score (warning: merging all RateTypes)
+
+expdata.FbRate %>%
+    ggplot(aes(x = NFC, y = percent, color=Condition)) +
+    geom_point() +
+    geom_smooth(method=lm, se=FALSE, fullrange=TRUE, aes(fill=Condition)) +
+    theme(axis.text = element_text(size = 16),
+          axis.title = element_text(size = 16),
+          legend.title = element_text(size=14),
+          legend.text = element_text(size=14),
+          plot.title = element_text(size = 16)) +
+    labs(title="NFC vs. FB rate", x = "NFC", y = "FB rate")
 
 
 ### inspect single subject ratings ###
@@ -430,7 +527,7 @@ FbRate.subj.noreward %>%
   theme(axis.text = element_text(size = 10),
         axis.title = element_text(size = 16))
 ```
-```{r}
+```{r FB ratings - arithmetic}
 ## FB ratings - after effort (arithmetic)
 
 #filter FbRateProc
@@ -520,12 +617,14 @@ EffFbRate.subj %>%
 ```{r}
 ########## Bayesian model comparison ##############
 
+# centering
+expdata.FbRate$percent = scale(expdata.FbRate$percent, center = TRUE, scale = FALSE) #scale=TRUE -> Z points
+
 library(BayesFactor)
 
 num.iter=10000 # number of MonteCarlo iterations (default: 10000)
 
 # as factor
-expdata.FbRate$Subject = as.factor(expdata.FbRate$Subject)
 expdata.FbRate$rateRep = as.factor(expdata.FbRate$rateRep)
 expdata.FbRate$RateType = as.factor(expdata.FbRate$RateType)
 
@@ -549,6 +648,9 @@ m.maineffects=lmBF(percent ~ Subject*RateType + outcome + efflev,
 m.interaction=lmBF(percent ~ Subject*RateType + outcome * efflev,
                    data=expdata.FbRate,iterations=num.iter,whichRandom=c("Subject*RateType"),
                    rscaleRandom="nuisance",rscaleFixed=.707)
+m.interactionNFC=lmBF(percent ~ Subject*RateType + outcome * efflev * NFC,
+                   data=expdata.FbRate,iterations=num.iter,whichRandom=c("Subject*RateType"),
+                   rscaleRandom="nuisance",rscaleFixed=.707)
 ```
 # BF model x | null
 
@@ -557,14 +659,16 @@ m.outcome/m.null
 m.efflev/m.null
 m.maineffects/m.null
 m.interaction/m.null
+m.interactionNFC/m.null
 ```
 # BF model x | model y
 
 ```{r}
-m.interaction/m.maineffects
-m.interaction/m.efflev
-m.interaction/m.outcome
-m.interaction/m.null
+m.interactionNFC/m.interaction
+m.interactionNFC/m.maineffects
+m.interactionNFC/m.efflev
+m.interactionNFC/m.outcome
+m.interactionNFC/m.null
 
 
 
@@ -648,4 +752,51 @@ t.noreward.F = t.test(x = FbRate.subj.F$VAS.mean[(FbRate.subj.F$Condition %in% "
 t.reward.A
 t.reward.R
 t.noreward.F
+```
+
+# frequentist linear models
+```{r}
+
+#mLM.null = lmer(percent ~ 1 + (1 + RateType|Subject), data=expdata.FbRate, REML = FALSE)
+# -> models with RateType as random effect do not converge
+
+mLM.null = lmer(percent ~ 1 + (1 |Subject),
+                data=expdata.FbRate, REML = FALSE)
+mLM.outcome = lmer(percent ~ outcome + (1 |Subject),
+                   data=expdata.FbRate, REML = FALSE)
+mLM.efflev = lmer(percent ~ efflev + (1 |Subject),
+                  data=expdata.FbRate, REML = FALSE)
+mLM.maineffects = lmer(percent ~ outcome + efflev + (1 |Subject),
+                       data=expdata.FbRate, REML = FALSE)
+mLM.interaction = lmer(percent ~ outcome * efflev + (1 |Subject),
+                       data=expdata.FbRate, REML = FALSE)
+mLM.interactionNFC = lmer(percent ~ outcome * efflev * NFC + (1 |Subject),
+                          data=expdata.FbRate, REML = FALSE)
+
+anova(mLM.null, mLM.outcome, mLM.efflev, mLM.maineffects, mLM.interaction, mLM.interactionNFC)
+
+anova(mLM.null, mLM.outcome)
+anova(mLM.null, mLM.efflev)
+anova(mLM.null, mLM.maineffects)
+anova(mLM.null, mLM.interaction)
+anova(mLM.null, mLM.interactionNFC)
+
+anova(mLM.null, mLM.outcome)
+anova(mLM.outcome, mLM.efflev)
+anova(mLM.outcome, mLM.maineffects)
+anova(mLM.outcome, mLM.maineffects)
+anova(mLM.maineffects, mLM.interaction)
+anova(mLM.outcome, mLM.interaction)
+anova(mLM.interaction, mLM.interactionNFC)
+
+# Forest-plot of estimates
+plot_model(mLM.interactionNFC, type = "std2")
+# random effects
+plot_model(mLM.interactionNFC, type = "re")
+# Marginal effects of interaction terms in model
+plot_model(mLM.interactionNFC, type = "int")
+
+p = interact_plot(mLM.interactionNFC, pred = "NFC", modx = "outcome", mod2 = "efflev",
+                  interval = T, plot.points = T)
+p + theme_classic()
 ```

@@ -34,6 +34,7 @@ library(reshape)
 library(sjstats)
 library(sjPlot)
 library(lme4)
+library(interactions)
 ```
 
 
@@ -45,7 +46,7 @@ wd <- ("C:/Users/gdavide/Documents/Pourtois/Master student supervision/DGEF/anal
 setwd(wd) # set work directory
 
 # DGEF data
-raw <- read.csv2("52.csv",header=TRUE,na.strings="NaN") # read data DGEF
+raw <- read.csv2("79.csv",header=TRUE,na.strings="NaN") # read data DGEF
 
 raw$Condition = as.factor(raw$Condition)
 
@@ -53,7 +54,7 @@ raw$Condition = as.factor(raw$Condition)
 expdata = raw[(raw$Running.Trial. %in% "ExperimentList"),]
 
 # Questionnaires - BisBas, NeedForCognition
-quest <- read.csv2("DGEF_Q_52.csv",header=TRUE,na.strings="NaN") # read data questionnaires
+quest <- read.csv2("DGEF_Q_79.csv",header=TRUE,na.strings="NaN") # read data questionnaires
 
 ```
 ```{r Questionnaires}
@@ -123,245 +124,6 @@ quest.subj.wide = dcast(quest.subj, Subject ~ scale, value.var="sumscore")
 
 ```
 
-```{r Age}
-## Age
-
-# subset
-expdata.age = subset(expdata, select = c(Subject, Age))
-# drop duplicates
-expdata.age = expdata.age[!duplicated(expdata.age$Subject),]
-
-# calculate median and range
-age.subj = c(median(expdata.age$Age),range(expdata.age$Age))
-
-```
-
-```{r Doors.RESP}
-## Doors.RESP - Door selection
-
-# filter single entries of Doors.RESP
-expdata.doorresp = expdata[!(expdata$SubTrial %in% c(2:10)),]
-
-# set up data frame for by-group processing 
-doorresp.subj = group_by(expdata.doorresp, Subject, Doors.RESP)
-
-# calculate the summary metrics: count of door selection by sbj and door
-doorresp.subj = summarise(doorresp.subj, 
-                    doorresp.count = n()
-                    )
-# wide format
-doorresp.subj = cast(doorresp.subj, Subject ~ Doors.RESP, value = "doorresp.count")
-doorresp.subj
-```
-
-
-```{r RateX}
-## RateX - Effort Task ratings
-
-# filter RatingList
-expdata.ETR = expdata[(expdata$Running.SubTrial. %in% "RatingList"),]
-
-# compute VAS as percentage (relative to pixel range)
-expdata.ETR$RateX = (expdata.ETR$RateX-316)/396*100
-
-# set up data frame for by-group processing (RatingList = list of questions rated)
-ETR.subj = group_by(expdata.ETR, Subject, RatingList)
-
-# calculate the summary metrics: average of RateX by sbj and question
-ETR.subj = summarise(ETR.subj, 
-                         RateX.mean = mean(RateX)
-                    )
-
-# set up data frame for by-group processing (rating-list wise)
-ETR.sum = group_by(ETR.subj, RatingList)
-# calculate the summary metrics: average and SD if RateX across sbj
-ETR.sum = summarise(ETR.sum, 
-                        Rate.avg = mean(RateX.mean),
-                        Rate.sd = sd(RateX.mean)
-                    )
-
-
-## stats on ETR (paired Bayesian t-tests)
-# moeilijk easy lower than moeilijk hard ( <0 )
-bf.ETR.moe = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "1")],
-                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "2")],
-                paired = TRUE, nullInterval = c(-Inf,0))
-bf.ETR.moe
-# aangenaam easy higher than aangenaam hard ( >0 )
-bf.ETR.aan = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "3")],
-                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "4")],
-                paired = TRUE, nullInterval = c(0,+Inf))
-bf.ETR.aan
-# gedreven easy different than gedreven hard 
-bf.ETR.ged = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "5")],
-                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "6")],
-                paired = TRUE)
-1/bf.ETR.ged
-# leuk easy different than leuk hard 
-bf.ETR.leu = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "7")],
-                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "8")],
-                paired = TRUE)
-1/bf.ETR.leu
-
-
-# wide format
-ETR.wide = cast(ETR.subj, Subject ~ RatingList, value = "RateX.mean")
-
-
-# plot ETR
-
-# whole question: labels=expdata.ETR$text[1:8]
-
-# create variables defining question type and effort level
-ETR.subj$qtype = rep(c("moeilijk", "aangenaam", "gedreven om correct", "leuk om correct"), each = 2)
-ETR.subj$qtype = factor(ETR.subj$qtype,                                                              # force order
-                        levels = c("moeilijk", "aangenaam", "gedreven om correct", "leuk om correct"))
-ETR.subj$effort = rep(c("easy", "hard"))
-
-# plot violin
-ETR.subj %>%
-  ggplot(aes(x = effort, y = RateX.mean)) +
-  geom_point() +
-  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
-              position = "dodge", draw_quantiles = NULL, trim = TRUE,
-              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) + 
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
-  geom_jitter(shape=16, position=position_jitter(0.02), size=1) +
-  theme(axis.text = element_text(size = 16),
-        axis.title = element_text(size = 16)) +
-  facet_grid(. ~ qtype)
-
-# plot geom line between effort levels for each sbj
-ETR.subj %>%
-  ggplot(aes(x = effort, y = RateX.mean, group = Subject)) +
-  geom_point() +
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
-  theme(axis.text = element_text(size = 16),
-        axis.title = element_text(size = 16)) +
-  geom_line() +
-  facet_grid(. ~ qtype)
-```
-
-```{r EffortResponse.ACC}
-## EffortResponse.ACC
-
-#filter EffortTaskList
-
-expdata.acc = expdata[(expdata$Running.SubTrial. %in% "EffortTaskList"),]
-
-# sort by sbj and cond
-expdata.acc = expdata.acc[order(expdata.acc$Subject, expdata.acc$Condition),] 
-
-# subset 
-expdata.acc = subset(expdata.acc, select = c(Subject, Condition, EffortResponse.ACC))
-
-# set up data frame for by-group processing 
-expdata.acc = group_by(expdata.acc, Condition)
-
-
-# calculate the summary metrics
-acc.sum = summarise(expdata.acc, 
-                                acc.mean = mean(EffortResponse.ACC),
-                                acc.sd = sd(EffortResponse.ACC))
-
-
-# plot accuracy with prob density
-
-expdata.acc = expdata.acc[!(expdata.acc$Condition %in% c("32", "52")),] # filter out Condition = 32 52 (exclude conditions where effort task followed the rating)
-
-acc.subj = group_by(expdata.acc, Condition, Subject) # set up data frame for by-group processing 
-
-acc.subj = summarise(acc.subj,                      # calculate the summary metrics - mean for Subject*Condition
-                    ACC.mean = mean(EffortResponse.ACC))
-
-# plot expdata.acc
-
-acc.subj$Condition = as.factor(acc.subj$Condition)
-
-acc.subj$label = factor(acc.subj$Condition, 
-                       labels=c("Easy", "Hard"))   
-
-
-acc.subj %>%
-  ggplot(aes(x = label, y = ACC.mean)) +
-  geom_point() +
-  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
-              position = "dodge", draw_quantiles = NULL, trim = TRUE,
-              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) + 
-  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
-  theme(axis.text = element_text(size = 16),
-        axis.title = element_text(size = 16))
-
-# stats on ACC (paired Bayesian t-test, one tailed)
-# acc easy higher than acc hard ( >0 )
-bf.acc = ttestBF(x = acc.subj$ACC.mean[(acc.subj$Condition %in% "22")],
-                y = acc.subj$ACC.mean[(acc.subj$Condition %in% "42")],
-                paired = TRUE, nullInterval = c(0,Inf))
-bf.acc
-```
-
-```{r EffortResponse.RT}
-## EffortResponse.RT
-
-
-#filter EffortTaskList
-
-expdata.RT = expdata[(expdata$Running.SubTrial. %in% "EffortTaskList"),]
-
-# filter EffortResponse.ACC != 0 (exclude mistakes)
-
-expdata.RT = expdata.RT[!(expdata.RT$EffortResponse.ACC %in% "0"),]
-
-
-# sort by sbj and cond
-expdata.RT = expdata.RT[order(expdata.RT$Subject, expdata.RT$Condition),] 
-
-# subset 
-expdata.RT = subset(expdata.RT, select = c(Subject, Condition, EffortResponse.RT))
-
-# filter out Condition = 32 52 (exclude conditions where effort task followed the rating)
-expdata.RT = expdata.RT[!(expdata.RT$Condition %in% c("32", "52")),]
-
-# set up data frame for by-group processing 
-RT.subj = group_by(expdata.RT, Condition, Subject)
-
-# calculate the summary metrics - mean for Subject*Condition
-RT.subj = summarise(RT.subj,
-                         RT.mean = mean(EffortResponse.RT))
-
-# calculate the summary metrics - mean for Condition (on within Subject average)
-RT.sum = group_by(RT.subj, Condition)
-RT.sum = summarise(RT.sum,
-                   RT.avg = mean(RT.mean),
-                   RT.sd = sd(RT.mean))
-
-# stats on RTs (paired Bayesian t-test, one tailed)
-# rt easy lower than rt hard ( <0 )
-bf.RT = ttestBF(x = RT.subj$RT.mean[(RT.subj$Condition %in% "22")],
-                y = RT.subj$RT.mean[(RT.subj$Condition %in% "42")],
-                paired = TRUE, nullInterval = c(-Inf,0))
-bf.RT
-
-# plot RT
-
-RT.subj$Condition = as.factor(RT.subj$Condition)
-
-RT.subj$label = factor(RT.subj$Condition, 
-                labels=c("Easy", "Hard"))  # excluded:  "EasyRating" , "HardRating"
-
-
-RT.subj %>%
-  ggplot(aes(x = label, y = RT.mean)) +
-  geom_point() +
-  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
-            position = "dodge", draw_quantiles = NULL, trim = TRUE,
-            scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) +
-  stat_summary(fun.y=mean, geom="point", shape=15, size=5, color="red") +
-  geom_jitter(shape=16, position=position_jitter(0.02), size=2) +
-  theme(axis.text = element_text(size = 16),
-        axis.title = element_text(size = 16))
-```
-
 ```{r FB ratings - guessing}
 ## FB ratings - after guessing
 
@@ -418,12 +180,11 @@ expdata.FbRate$reward = scale(expdata.FbRate$reward, center=TRUE, scale=FALSE)
 expdata.FbRate$bis = scale(expdata.FbRate$bis, center=TRUE, scale=FALSE)
 expdata.FbRate$NFC = scale(expdata.FbRate$NFC, center=TRUE, scale=FALSE)
 
-# ## exclude sbj with out-of-scale FB rating
+## exclude sbj with out-of-scale FB rating
 # FbRate.blacklist = unique(expdata.FbRate$Subject[(expdata.FbRate$percent > 110 | expdata.FbRate$percent < -10)])
 # expdata.FbRate = expdata.FbRate[!(expdata.FbRate$Subject %in% FbRate.blacklist),]
 
 ## plot FbRate for cond against questionnaire score (warning: merging all RateTypes)
-
 expdata.FbRate %>%
     ggplot(aes(x = NFC, y = percent, color=Condition)) +
     geom_point() +
@@ -437,7 +198,6 @@ expdata.FbRate %>%
 
 
 ### inspect single subject ratings ###
-
 expdata.FbRate %>% 
   mutate(label = paste0(expdata.FbRate$Condition, expdata.FbRate$RateType)) %>%  # create label defining single levels by RateType*Outcome*Effort
   filter(Subject == 1) %>%                                                        # filter sbj n
@@ -455,7 +215,7 @@ expdata.FbRate %>%
 
 
 
-############# Exporting FB rating - sbj level AVERAGES by Condition and RateType #############
+## Exporting FB rating - sbj level AVERAGES by Condition and RateType ##
 
 # set up data frame for by-group processing 
 FbRate.subj = group_by(expdata.FbRate, Condition, Subject, RateType)
@@ -463,6 +223,15 @@ FbRate.subj = group_by(expdata.FbRate, Condition, Subject, RateType)
 # calculate the summary metrics - mean for Subject*Condition*RateType
 FbRate.subj = summarise(FbRate.subj,
                         VAS.mean = mean(percent))
+
+
+### exclude sbj with out-of-scale FB rating - based on mean for Subject*Condition*RateType ###
+FbRate.blacklist = unique(FbRate.subj$Subject[(FbRate.subj$VAS.mean > 105 | FbRate.subj$VAS.mean < -5)])
+expdata.FbRate = expdata.FbRate[!(expdata.FbRate$Subject %in% FbRate.blacklist),]
+FbRate.subj = FbRate.subj[!(FbRate.subj$Subject %in% FbRate.blacklist),] # kick out from averages data
+expdata = expdata[!(expdata$Subject %in% FbRate.blacklist),] # kick out from original dataset
+
+
 
 # save out expdata.FbRate (with inverted score for Frustrerend)
   # wide format
@@ -796,7 +565,245 @@ plot_model(mLM.interactionNFC, type = "re")
 # Marginal effects of interaction terms in model
 plot_model(mLM.interactionNFC, type = "int")
 
-p = interact_plot(mLM.interactionNFC, pred = "NFC", modx = "outcome", mod2 = "efflev",
-                  interval = T, plot.points = T)
+p = interact_plot(mLM.interactionNFC, pred = "NFC", modx = "efflev", mod2 = "outcome",
+                  interval = T, plot.points = F)
 p + theme_classic()
+```
+```{r Age}
+## Age
+
+# subset
+expdata.age = subset(expdata, select = c(Subject, Age))
+# drop duplicates
+expdata.age = expdata.age[!duplicated(expdata.age$Subject),]
+
+# calculate median and range
+age.subj = c(median(expdata.age$Age),range(expdata.age$Age))
+
+```
+
+```{r Doors.RESP}
+## Doors.RESP - Door selection
+
+# filter single entries of Doors.RESP
+expdata.doorresp = expdata[!(expdata$SubTrial %in% c(2:10)),]
+
+# set up data frame for by-group processing 
+doorresp.subj = group_by(expdata.doorresp, Subject, Doors.RESP)
+
+# calculate the summary metrics: count of door selection by sbj and door
+doorresp.subj = summarise(doorresp.subj, 
+                    doorresp.count = n()
+                    )
+# wide format
+doorresp.subj = cast(doorresp.subj, Subject ~ Doors.RESP, value = "doorresp.count")
+doorresp.subj
+```
+
+
+```{r RateX}
+## RateX - Effort Task ratings
+
+# filter RatingList
+expdata.ETR = expdata[(expdata$Running.SubTrial. %in% "RatingList"),]
+
+# compute VAS as percentage (relative to pixel range)
+expdata.ETR$RateX = (expdata.ETR$RateX-316)/396*100
+
+# set up data frame for by-group processing (RatingList = list of questions rated)
+ETR.subj = group_by(expdata.ETR, Subject, RatingList)
+
+# calculate the summary metrics: average of RateX by sbj and question
+ETR.subj = summarise(ETR.subj, 
+                         RateX.mean = mean(RateX)
+                    )
+
+# set up data frame for by-group processing (rating-list wise)
+ETR.sum = group_by(ETR.subj, RatingList)
+# calculate the summary metrics: average and SD if RateX across sbj
+ETR.sum = summarise(ETR.sum, 
+                        Rate.avg = mean(RateX.mean),
+                        Rate.sd = sd(RateX.mean)
+                    )
+
+
+## stats on ETR (paired Bayesian t-tests)
+# moeilijk easy lower than moeilijk hard ( <0 )
+bf.ETR.moe = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "1")],
+                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "2")],
+                paired = TRUE, nullInterval = c(-Inf,0))
+bf.ETR.moe
+# aangenaam easy higher than aangenaam hard ( >0 )
+bf.ETR.aan = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "3")],
+                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "4")],
+                paired = TRUE, nullInterval = c(0,+Inf))
+bf.ETR.aan
+# gedreven easy different than gedreven hard 
+bf.ETR.ged = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "5")],
+                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "6")],
+                paired = TRUE)
+1/bf.ETR.ged
+# leuk easy different than leuk hard 
+bf.ETR.leu = ttestBF(x = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "7")],
+                y = ETR.subj$RateX.mean[(ETR.subj$RatingList %in% "8")],
+                paired = TRUE)
+1/bf.ETR.leu
+
+
+# wide format
+ETR.wide = cast(ETR.subj, Subject ~ RatingList, value = "RateX.mean")
+
+
+# plot ETR
+
+# whole question: labels=expdata.ETR$text[1:8]
+
+# create variables defining question type and effort level
+ETR.subj$qtype = rep(c("moeilijk", "aangenaam", "gedreven om correct", "leuk om correct"), each = 2)
+ETR.subj$qtype = factor(ETR.subj$qtype,                                                              # force order
+                        levels = c("moeilijk", "aangenaam", "gedreven om correct", "leuk om correct"))
+ETR.subj$effort = rep(c("easy", "hard"))
+
+# plot violin
+ETR.subj %>%
+  ggplot(aes(x = effort, y = RateX.mean)) +
+  geom_point() +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+              position = "dodge", draw_quantiles = NULL, trim = TRUE,
+              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) + 
+  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
+  geom_jitter(shape=16, position=position_jitter(0.02), size=1) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16)) +
+  facet_grid(. ~ qtype)
+
+# plot geom line between effort levels for each sbj
+ETR.subj %>%
+  ggplot(aes(x = effort, y = RateX.mean, group = Subject)) +
+  geom_point() +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16)) +
+  geom_line() +
+  facet_grid(. ~ qtype)
+```
+
+```{r EffortResponse.ACC}
+## EffortResponse.ACC
+
+#filter EffortTaskList
+
+expdata.acc = expdata[(expdata$Running.SubTrial. %in% "EffortTaskList"),]
+
+# sort by sbj and cond
+expdata.acc = expdata.acc[order(expdata.acc$Subject, expdata.acc$Condition),] 
+
+# subset 
+expdata.acc = subset(expdata.acc, select = c(Subject, Condition, EffortResponse.ACC))
+
+# set up data frame for by-group processing 
+expdata.acc = group_by(expdata.acc, Condition)
+
+
+# calculate the summary metrics
+acc.sum = summarise(expdata.acc, 
+                                acc.mean = mean(EffortResponse.ACC),
+                                acc.sd = sd(EffortResponse.ACC))
+
+
+# plot accuracy with prob density
+
+expdata.acc = expdata.acc[!(expdata.acc$Condition %in% c("32", "52")),] # filter out Condition = 32 52 (exclude conditions where effort task followed the rating)
+
+acc.subj = group_by(expdata.acc, Condition, Subject) # set up data frame for by-group processing 
+
+acc.subj = summarise(acc.subj,                      # calculate the summary metrics - mean for Subject*Condition
+                    ACC.mean = mean(EffortResponse.ACC))
+
+# plot expdata.acc
+
+acc.subj$Condition = as.factor(acc.subj$Condition)
+
+acc.subj$label = factor(acc.subj$Condition, 
+                       labels=c("Easy", "Hard"))   
+
+
+acc.subj %>%
+  ggplot(aes(x = label, y = ACC.mean)) +
+  geom_point() +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+              position = "dodge", draw_quantiles = NULL, trim = TRUE,
+              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) + 
+  stat_summary(fun.y=mean, geom="point", shape=20, size=5) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16))
+
+# stats on ACC (paired Bayesian t-test, one tailed)
+# acc easy higher than acc hard ( >0 )
+bf.acc = ttestBF(x = acc.subj$ACC.mean[(acc.subj$Condition %in% "22")],
+                y = acc.subj$ACC.mean[(acc.subj$Condition %in% "42")],
+                paired = TRUE, nullInterval = c(0,Inf))
+bf.acc
+```
+
+```{r EffortResponse.RT}
+## EffortResponse.RT
+
+
+#filter EffortTaskList
+
+expdata.RT = expdata[(expdata$Running.SubTrial. %in% "EffortTaskList"),]
+
+# filter EffortResponse.ACC != 0 (exclude mistakes)
+
+expdata.RT = expdata.RT[!(expdata.RT$EffortResponse.ACC %in% "0"),]
+
+
+# sort by sbj and cond
+expdata.RT = expdata.RT[order(expdata.RT$Subject, expdata.RT$Condition),] 
+
+# subset 
+expdata.RT = subset(expdata.RT, select = c(Subject, Condition, EffortResponse.RT))
+
+# filter out Condition = 32 52 (exclude conditions where effort task followed the rating)
+expdata.RT = expdata.RT[!(expdata.RT$Condition %in% c("32", "52")),]
+
+# set up data frame for by-group processing 
+RT.subj = group_by(expdata.RT, Condition, Subject)
+
+# calculate the summary metrics - mean for Subject*Condition
+RT.subj = summarise(RT.subj,
+                         RT.mean = mean(EffortResponse.RT))
+
+# calculate the summary metrics - mean for Condition (on within Subject average)
+RT.sum = group_by(RT.subj, Condition)
+RT.sum = summarise(RT.sum,
+                   RT.avg = mean(RT.mean),
+                   RT.sd = sd(RT.mean))
+
+# stats on RTs (paired Bayesian t-test, one tailed)
+# rt easy lower than rt hard ( <0 )
+bf.RT = ttestBF(x = RT.subj$RT.mean[(RT.subj$Condition %in% "22")],
+                y = RT.subj$RT.mean[(RT.subj$Condition %in% "42")],
+                paired = TRUE, nullInterval = c(-Inf,0))
+bf.RT
+
+# plot RT
+
+RT.subj$Condition = as.factor(RT.subj$Condition)
+
+RT.subj$label = factor(RT.subj$Condition, 
+                labels=c("Easy", "Hard"))  # excluded:  "EasyRating" , "HardRating"
+
+
+RT.subj %>%
+  ggplot(aes(x = label, y = RT.mean)) +
+  geom_point() +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+            position = "dodge", draw_quantiles = NULL, trim = TRUE,
+            scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) +
+  stat_summary(fun.y=mean, geom="point", shape=15, size=5, color="red") +
+  geom_jitter(shape=16, position=position_jitter(0.02), size=2) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16))
 ```
